@@ -44,12 +44,6 @@ struct HostRowView: View {
                         saveAliasAction(aliasDraft)
                     }
 
-                if host.isManual {
-                    Text("manual")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-
                 Spacer()
 
                 if let primaryAddress = host.ipv4Addresses.first {
@@ -74,14 +68,24 @@ struct HostRowView: View {
                 }
             }
 
-            if let networkName = host.networkName, !networkName.isEmpty {
-                Text(networkName)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else if let networkID = host.networkID, !networkID.isEmpty {
-                Text(networkID)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
+            HStack {
+                if let networkName = host.networkName, !networkName.isEmpty {
+                    Text(networkName)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else if let networkID = host.networkID, !networkID.isEmpty {
+                    Text(networkID)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                if host.isManual {
+                    Text("manual")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             ForEach(Array(host.ipv4Addresses.dropFirst()), id: \.self) { address in
