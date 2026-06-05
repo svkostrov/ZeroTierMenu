@@ -11,8 +11,7 @@ struct MenuContentView: View {
             statusSection
             hostList
             manualHostSection
-            launchAtLoginSection
-            quitSection
+            footerSection
         }
         .padding(16)
     }
@@ -172,23 +171,26 @@ struct MenuContentView: View {
         }
     }
 
-    private var launchAtLoginSection: some View {
-        Toggle("Автозапуск при старте системы", isOn: Binding(
-            get: { store.launchAtLoginEnabled },
-            set: { newValue in
-                store.setLaunchAtLogin(newValue)
-            }
-        ))
-        .toggleStyle(.checkbox)
-        .font(.caption)
-    }
-
-    private var quitSection: some View {
+    private var footerSection: some View {
         HStack {
+            Toggle("Автозапуск", isOn: Binding(
+                get: { store.launchAtLoginEnabled },
+                set: { newValue in
+                    store.setLaunchAtLogin(newValue)
+                }
+            ))
+            .toggleStyle(.checkbox)
+            .font(.caption)
+
             Spacer()
+
             Button("Выход") {
                 NSApp.terminate(nil)
             }
+            .font(.caption)
+            .buttonStyle(.plain)
+            .foregroundStyle(.primary)
         }
+        .font(.caption)
     }
 }
