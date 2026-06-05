@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct MenuContentView: View {
@@ -11,6 +12,7 @@ struct MenuContentView: View {
             hostList
             manualHostSection
             launchAtLoginSection
+            quitSection
         }
         .padding(16)
     }
@@ -179,5 +181,14 @@ struct MenuContentView: View {
         ))
         .toggleStyle(.checkbox)
         .font(.caption)
+    }
+
+    private var quitSection: some View {
+        HStack {
+            Spacer()
+            Button("Выход") {
+                NSApp.terminate(nil)
+            }
+        }
     }
 }
