@@ -1,14 +1,15 @@
 import Foundation
 
 struct HostAliasStore {
-    private let key = "hostAliases"
-    private let defaults = UserDefaults.standard
+    private let configStore = AppConfigStore()
 
     func loadAliases() -> [String: String] {
-        defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+        configStore.loadConfig().hostAliases
     }
 
     func saveAliases(_ aliases: [String: String]) {
-        defaults.set(aliases, forKey: key)
+        var config = configStore.loadConfig()
+        config.hostAliases = aliases
+        configStore.saveConfig(config)
     }
 }

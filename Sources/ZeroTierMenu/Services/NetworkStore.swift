@@ -156,12 +156,23 @@ final class NetworkStore {
 
     func saveAlias(_ alias: String, for host: NetworkHost) {
         let trimmed = alias.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hostIP = host.ipv4Addresses.first
+
         if trimmed.isEmpty {
             hostAliases.removeValue(forKey: host.id)
         } else {
             hostAliases[host.id] = trimmed
         }
         aliasStore.saveAliases(hostAliases)
+
+        if host.isManual, let hostIP {
+            manualHosts = manualHosts.map { currentHost in
+                guard currentHost.ip == hostIP else { return currentHost }
+                return SavedManualHost(ip: currentHost.ip, name: trimmed)
+            }
+            manualHostStore.saveHosts(manualHosts)
+        }
+
         hosts = hosts.map { currentHost in
             guard currentHost.id == host.id else { return currentHost }
             return NetworkHost(

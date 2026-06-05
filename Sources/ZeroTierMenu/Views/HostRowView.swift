@@ -20,7 +20,7 @@ struct HostRowView: View {
         self.copyAction = copyAction
         self.saveAliasAction = saveAliasAction
         self.removeManualHostAction = removeManualHostAction
-        _aliasDraft = State(initialValue: initialAlias)
+        _aliasDraft = State(initialValue: initialAlias.isEmpty ? host.displayName : initialAlias)
     }
 
     var body: some View {
@@ -30,8 +30,12 @@ struct HostRowView: View {
                     .fill(host.isOnline ? Color.green : Color.secondary.opacity(0.5))
                     .frame(width: 8, height: 8)
 
-                Text(host.displayName)
+                TextField("Имя хоста", text: $aliasDraft)
+                    .textFieldStyle(.plain)
                     .font(.subheadline.weight(.medium))
+                    .onSubmit {
+                        saveAliasAction(aliasDraft)
+                    }
 
                 if host.isManual {
                     Text("manual")
@@ -73,37 +77,29 @@ struct HostRowView: View {
                 .buttonStyle(.plain)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                TextField("Задать имя вручную", text: $aliasDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit {
-                        saveAliasAction(aliasDraft)
+            HStack {
+                if host.resolvedName != nil {
+                    Button("Сбросить") {
+                        aliasDraft = host.displayName
+                        saveAliasAction("")
                     }
-
-                HStack {
-                    if host.resolvedName != nil {
-                        Button("Сбросить") {
-                            aliasDraft = ""
-                            saveAliasAction("")
-                        }
-                        .disabled(initialAlias.isEmpty)
-                    }
-
-                    if host.isManual {
-                        Button("Удалить хост") {
-                            removeManualHostAction()
-                        }
-                    }
-
-                    Spacer()
+                    .disabled(initialAlias.isEmpty)
                 }
+
+                if host.isManual {
+                    Button("Удалить хост") {
+                        removeManualHostAction()
+                    }
+                }
+
+                Spacer()
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .onChange(of: initialAlias) { _, newValue in
-            aliasDraft = newValue
+            aliasDraft = newValue.isEmpty ? host.displayName : newValue
         }
     }
 }
