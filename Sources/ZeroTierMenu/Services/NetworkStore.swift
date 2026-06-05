@@ -1,7 +1,6 @@
 import AppKit
 import Foundation
 import Observation
-import ServiceManagement
 
 @MainActor
 @Observable
@@ -252,7 +251,7 @@ final class NetworkStore {
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
             try launchAtLoginService.setEnabled(enabled)
-            launchAtLoginEnabled = launchAtLoginService.isEnabled()
+            launchAtLoginEnabled = enabled
             setStatus(
                 launchAtLoginEnabled ? "Автозапуск включён." : "Автозапуск выключен.",
                 isError: false
