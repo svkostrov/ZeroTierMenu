@@ -42,6 +42,7 @@ final class NetworkStore {
         networks.count > 1
     }
 
+    private var didBootstrap = false
     private let localService = LocalZeroTierService()
     private let scanner = NetworkScannerService()
     private let aliasStore = HostAliasStore()
@@ -52,6 +53,13 @@ final class NetworkStore {
         hostAliases = aliasStore.loadAliases()
         manualHosts = manualHostStore.loadHosts()
         launchAtLoginEnabled = launchAtLoginService.isEnabled()
+    }
+
+    func bootstrap() async {
+        guard !didBootstrap else { return }
+        didBootstrap = true
+        await loadLocalNetworkContext()
+        await refreshIfPossible()
     }
 
     func loadLocalNetworkContext() async {
