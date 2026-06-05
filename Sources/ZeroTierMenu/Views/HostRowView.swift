@@ -33,6 +33,13 @@ struct HostRowView: View {
                 TextField("Имя хоста", text: $aliasDraft)
                     .textFieldStyle(.plain)
                     .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(.white.opacity(0.12), lineWidth: 1)
+                    )
                     .onSubmit {
                         saveAliasAction(aliasDraft)
                     }
@@ -44,6 +51,22 @@ struct HostRowView: View {
                 }
 
                 Spacer()
+
+                if let primaryAddress = host.ipv4Addresses.first {
+                    Button {
+                        copyAction(primaryAddress)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(primaryAddress)
+                                .font(.system(.caption2, design: .monospaced))
+                            Image(systemName: "doc.on.doc")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 if !host.isOnline {
                     Text("offline")
                         .font(.caption2.weight(.medium))
@@ -61,7 +84,7 @@ struct HostRowView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(host.ipv4Addresses, id: \.self) { address in
+            ForEach(Array(host.ipv4Addresses.dropFirst()), id: \.self) { address in
                 Button {
                     copyAction(address)
                 } label: {
