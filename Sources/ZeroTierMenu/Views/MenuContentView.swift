@@ -47,29 +47,23 @@ struct MenuContentView: View {
                             .font(.caption.weight(.medium))
 
                         if let localIPv4 = network.ipv4 {
-                            Text("Этот Mac: \(localIPv4)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if let subnetCIDR = network.subnet {
-                            Text("Подсеть: \(subnetCIDR)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                            Button("Ваш IP: \(localIPv4)") {
+                                store.copyIPv4(localIPv4)
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                         }
                     }
                 }
             } else if let network = store.networks.first {
                 if let localIPv4 = network.ipv4 {
-                    Text("Этот Mac: \(localIPv4)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let subnetCIDR = network.subnet {
-                    Text("Подсеть: \(subnetCIDR)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Button("Ваш IP: \(localIPv4)") {
+                        store.copyIPv4(localIPv4)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             }
         }
