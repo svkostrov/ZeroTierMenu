@@ -77,7 +77,7 @@ struct MenuContentView: View {
 
     private var scanSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Button("Сканировать сеть") {
                     Task {
                         await store.refreshHosts()
@@ -91,9 +91,63 @@ struct MenuContentView: View {
                         .controlSize(.small)
                 }
 
+                Toggle("Авто", isOn: Binding(
+                    get: { store.autoScanEnabled },
+                    set: { newValue in
+                        store.setAutoScanEnabled(newValue)
+                    }
+                ))
+                .toggleStyle(.checkbox)
+                .font(.caption2)
+
+                intervalStepper(
+                    title: "ч",
+                    value: Binding(
+                        get: { store.autoScanHours },
+                        set: { newValue in
+                            store.setAutoScanHours(newValue)
+                        }
+                    ),
+                    range: 0...23
+                )
+
+                intervalStepper(
+                    title: "м",
+                    value: Binding(
+                        get: { store.autoScanMinutes },
+                        set: { newValue in
+                            store.setAutoScanMinutes(newValue)
+                        }
+                    ),
+                    range: 0...59
+                )
+
+                intervalStepper(
+                    title: "с",
+                    value: Binding(
+                        get: { store.autoScanSeconds },
+                        set: { newValue in
+                            store.setAutoScanSeconds(newValue)
+                        }
+                    ),
+                    range: 0...59
+                )
+
                 Spacer()
             }
         }
+    }
+
+    private func intervalStepper(title: String, value: Binding<Int>, range: ClosedRange<Int>) -> some View {
+        HStack(spacing: 2) {
+            Text("\(value.wrappedValue)\(title)")
+                .font(.caption2.monospacedDigit())
+                .frame(minWidth: 26, alignment: .trailing)
+            Stepper("", value: value, in: range)
+                .labelsHidden()
+                .controlSize(.mini)
+        }
+        .fixedSize()
     }
 
     private var statusSection: some View {

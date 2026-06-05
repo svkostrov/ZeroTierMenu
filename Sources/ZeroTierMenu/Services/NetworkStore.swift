@@ -18,6 +18,10 @@ final class NetworkStore {
     var manualHostIPDraft = ""
     var manualHostNameDraft = ""
     var launchAtLoginEnabled = false
+    var autoScanEnabled = true
+    var autoScanHours = 0
+    var autoScanMinutes = 1
+    var autoScanSeconds = 0
 
     var emptyStateDescription: String {
         if isLoading {
@@ -43,13 +47,21 @@ final class NetworkStore {
     }
 
     private var didBootstrap = false
+    private var autoScanTask: Task<Void, Never>?
+    private var lastScanAt: Date?
     private let localService = LocalZeroTierService()
     private let scanner = NetworkScannerService()
     private let aliasStore = HostAliasStore()
     private let manualHostStore = ManualHostStore()
     private let launchAtLoginService = LaunchAtLoginService()
+    private let configStore = AppConfigStore()
 
     init() {
+        let config = configStore.loadConfig()
+        autoScanEnabled = config.autoScanEnabled
+        autoScanHours = config.autoScanHours
+        autoScanMinutes = config.autoScanMinutes
+        autoScanSeconds = config.autoScanSeconds
         hostAliases = aliasStore.loadAliases()
         manualHosts = manualHostStore.loadHosts()
         launchAtLoginEnabled = launchAtLoginService.isEnabled()
@@ -60,6 +72,7 @@ final class NetworkStore {
         didBootstrap = true
         await loadLocalNetworkContext()
         await refreshIfPossible()
+        startAutoScanLoopIfNeeded()
     }
 
     func loadLocalNetworkContext() async {
@@ -86,6 +99,8 @@ final class NetworkStore {
     }
 
     func refreshHosts() async {
+        guard !isLoading else { return }
+
         let scannableNetworks = networks.filter { network in
             guard let subnet = network.subnet else { return false }
             return !subnet.isEmpty
@@ -98,7 +113,10 @@ final class NetworkStore {
         }
 
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            lastScanAt = Date()
+        }
 
         var scannedHosts: [NetworkHost] = []
         for network in scannableNetworks {
@@ -251,9 +269,68 @@ final class NetworkStore {
         }
     }
 
+    func setAutoScanEnabled(_ enabled: Bool) {
+        autoScanEnabled = enabled
+        saveAutoScanSettings()
+        setStatus(enabled ? "Автосканирование включено." : "Автосканирование выключено.", isError: false)
+    }
+
+    func setAutoScanHours(_ value: Int) {
+        autoScanHours = min(max(value, 0), 23)
+        normalizeAutoScanInterval()
+        saveAutoScanSettings()
+    }
+
+    func setAutoScanMinutes(_ value: Int) {
+        autoScanMinutes = min(max(value, 0), 59)
+        normalizeAutoScanInterval()
+        saveAutoScanSettings()
+    }
+
+    func setAutoScanSeconds(_ value: Int) {
+        autoScanSeconds = min(max(value, 0), 59)
+        normalizeAutoScanInterval()
+        saveAutoScanSettings()
+    }
+
     private func setStatus(_ message: String, isError: Bool) {
         statusMessage = message
         statusIsError = isError
+    }
+
+    private var autoScanIntervalSeconds: Int {
+        max((autoScanHours * 3600) + (autoScanMinutes * 60) + autoScanSeconds, 1)
+    }
+
+    private func startAutoScanLoopIfNeeded() {
+        guard autoScanTask == nil else { return }
+        autoScanTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard autoScanEnabled, !isLoading else { continue }
+                let interval = TimeInterval(autoScanIntervalSeconds)
+                let lastScan = lastScanAt ?? .distantPast
+                guard Date().timeIntervalSince(lastScan) >= interval else { continue }
+                await refreshHosts()
+            }
+        }
+    }
+
+    private func normalizeAutoScanInterval() {
+        if autoScanHours == 0, autoScanMinutes == 0, autoScanSeconds == 0 {
+            autoScanSeconds = 1
+        }
+    }
+
+    private func saveAutoScanSettings() {
+        normalizeAutoScanInterval()
+        var config = configStore.loadConfig()
+        config.autoScanEnabled = autoScanEnabled
+        config.autoScanHours = autoScanHours
+        config.autoScanMinutes = autoScanMinutes
+        config.autoScanSeconds = autoScanSeconds
+        configStore.saveConfig(config)
     }
 
     private func preferredDisplayName(for host: NetworkHost) -> String {
