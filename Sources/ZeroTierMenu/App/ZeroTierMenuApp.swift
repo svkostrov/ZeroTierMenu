@@ -7,7 +7,7 @@ struct ZeroTierMenuApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuContentView(store: store)
-                .frame(width: 430, height: 700)
+                .frame(width: 410, height: 620)
                 .task {
                     await store.loadLocalNetworkContext()
                     await store.refreshIfPossible()

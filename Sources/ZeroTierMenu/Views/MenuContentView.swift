@@ -5,7 +5,7 @@ struct MenuContentView: View {
     @Bindable var store: NetworkStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             header
             scanSection
             statusSection
@@ -13,11 +13,11 @@ struct MenuContentView: View {
             manualHostSection
             footerSection
         }
-        .padding(16)
+        .padding(12)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(store.hasMultipleNetworks ? "ZeroTier Networks" : (store.primaryNetworkLabel.isEmpty ? "ZeroTier Network" : store.primaryNetworkLabel))
                 .font(.headline)
 
@@ -76,13 +76,14 @@ struct MenuContentView: View {
     }
 
     private var scanSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
                 Button("Сканировать сеть") {
                     Task {
                         await store.refreshHosts()
                     }
                 }
+                .controlSize(.small)
                 .disabled(store.isLoading)
 
                 if store.isLoading {
@@ -96,7 +97,7 @@ struct MenuContentView: View {
     }
 
     private var statusSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 3) {
             if !store.statusMessage.isEmpty {
                 Text(store.statusMessage)
                     .font(.caption)
@@ -121,7 +122,7 @@ struct MenuContentView: View {
                 )
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(store.hosts) { host in
                             HostRowView(
                                 host: host,
@@ -141,13 +142,13 @@ struct MenuContentView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 300, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var manualHostSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Добавить хост вручную")
-                .font(.subheadline.weight(.medium))
+                .font(.caption.weight(.semibold))
 
             HStack(spacing: 8) {
                 TextField("IPv4 адрес", text: $store.manualHostIPDraft)
@@ -164,6 +165,7 @@ struct MenuContentView: View {
                         await store.refreshHosts()
                     }
                 }
+                .controlSize(.small)
                 .disabled(store.manualHostIPDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Spacer()

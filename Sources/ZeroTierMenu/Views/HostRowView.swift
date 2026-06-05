@@ -24,15 +24,15 @@ struct HostRowView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Circle()
                     .fill(host.isOnline ? Color.green : Color.secondary.opacity(0.5))
-                    .frame(width: 8, height: 8)
+                    .frame(width: 7, height: 7)
 
                 TextField("Имя хоста", text: $aliasDraft)
                     .textFieldStyle(.plain)
-                    .font(.subheadline.weight(.medium))
+                    .font(.subheadline.weight(.semibold))
                     .onSubmit {
                         saveAliasAction(aliasDraft)
                     }
@@ -67,10 +67,10 @@ struct HostRowView: View {
                 } label: {
                     HStack {
                         Text(address)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.system(.caption2, design: .monospaced))
                         Spacer()
                         Image(systemName: "doc.on.doc")
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -83,6 +83,7 @@ struct HostRowView: View {
                         aliasDraft = host.displayName
                         saveAliasAction("")
                     }
+                    .controlSize(.small)
                     .disabled(initialAlias.isEmpty)
                 }
 
@@ -90,13 +91,14 @@ struct HostRowView: View {
                     Button("Удалить хост") {
                         removeManualHostAction()
                     }
+                    .controlSize(.small)
                 }
 
                 Spacer()
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .onChange(of: initialAlias) { _, newValue in
             aliasDraft = newValue.isEmpty ? host.displayName : newValue
