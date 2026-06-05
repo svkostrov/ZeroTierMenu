@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 
 struct NetworkScannerService {
-    func scan(subnetCIDR: String, excluding localIPv4: String?) async -> [NetworkHost] {
+    func scan(subnetCIDR: String, excluding localIPv4: String?, networkID: String, networkName: String) async -> [NetworkHost] {
         guard let subnet = IPv4Subnet(cidr: subnetCIDR) else {
             return []
         }
@@ -14,7 +14,7 @@ struct NetworkScannerService {
             for ip in candidates {
                 group.addTask {
                     await limiter.acquire()
-                    let result = await scanHost(ip)
+                    let result = await scanHost(ip, networkID: networkID, networkName: networkName)
                     await limiter.release()
                     return result
                 }
@@ -52,20 +52,38 @@ struct NetworkScannerService {
         }
     }
 
-    private func scanHost(_ ip: String) async -> NetworkHost? {
+    private func scanHost(_ ip: String, networkID: String, networkName: String) async -> NetworkHost? {
         let isReachable = await ping(ip)
         guard isReachable else { return nil }
 
         let resolvedName = resolveHostName(ip)
         let hostName = resolvedName ?? ip
-        return NetworkHost(id: ip, displayName: hostName, resolvedName: resolvedName, ipv4Addresses: [ip], isOnline: true, isManual: false)
+        return NetworkHost(
+            id: "\(networkID)|\(ip)",
+            networkID: networkID,
+            networkName: networkName,
+            displayName: hostName,
+            resolvedName: resolvedName,
+            ipv4Addresses: [ip],
+            isOnline: true,
+            isManual: false
+        )
     }
 
     private func probeHost(_ ip: String) async -> NetworkHost {
         let isReachable = await ping(ip)
         let resolvedName = resolveHostName(ip)
         let hostName = resolvedName ?? ip
-        return NetworkHost(id: ip, displayName: hostName, resolvedName: resolvedName, ipv4Addresses: [ip], isOnline: isReachable, isManual: true)
+        return NetworkHost(
+            id: ip,
+            networkID: nil,
+            networkName: nil,
+            displayName: hostName,
+            resolvedName: resolvedName,
+            ipv4Addresses: [ip],
+            isOnline: isReachable,
+            isManual: true
+        )
     }
 
     private func ping(_ ip: String) async -> Bool {

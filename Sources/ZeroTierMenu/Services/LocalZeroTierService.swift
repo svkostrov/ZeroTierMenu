@@ -1,7 +1,7 @@
 import Foundation
 
 struct LocalZeroTierService {
-    func loadNetworkContext(networkID: String) async -> LocalNetworkContext? {
+    func loadNetworkContexts() async -> [LocalNetworkContext] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/local/bin/zerotier-cli")
         process.arguments = ["listnetworks", "-j"]
@@ -14,31 +14,41 @@ struct LocalZeroTierService {
             try process.run()
             process.waitUntilExit()
             guard process.terminationStatus == 0 else {
-                return nil
+                return []
             }
 
             let data = output.fileHandleForReading.readDataToEndOfFile()
             let networks = try JSONDecoder().decode([LocalNetwork].self, from: data)
-            guard let match = networks.first(where: { $0.id == networkID || $0.nwid == networkID }) else {
-                return nil
-            }
+            return networks
+                .filter { $0.status == "OK" && ($0.id != nil || $0.nwid != nil) }
+                .compactMap { network in
+                    let networkID = network.id ?? network.nwid ?? ""
+                    guard !networkID.isEmpty else { return nil }
 
-            let ipv4 = match.assignedAddresses?
-                .map { $0.split(separator: "/").first.map(String.init) ?? $0 }
-                .first(where: { $0.contains(".") })
+                    let ipv4 = network.assignedAddresses?
+                        .map { $0.split(separator: "/").first.map(String.init) ?? $0 }
+                        .first(where: { $0.contains(".") })
 
-            let subnet = match.routes?
-                .compactMap(\.target)
-                .first(where: { $0.contains(".") && $0.contains("/") })
+                    let subnet = network.routes?
+                        .compactMap(\.target)
+                        .first(where: { $0.contains(".") && $0.contains("/") })
 
-            return LocalNetworkContext(name: match.name ?? "", ipv4: ipv4, subnet: subnet)
+                    return LocalNetworkContext(
+                        networkID: networkID,
+                        name: network.name ?? "",
+                        ipv4: ipv4,
+                        subnet: subnet
+                    )
+                }
         } catch {
-            return nil
+            return []
         }
     }
 }
 
-struct LocalNetworkContext {
+struct LocalNetworkContext: Identifiable, Equatable {
+    var id: String { networkID }
+    let networkID: String
     let name: String
     let ipv4: String?
     let subnet: String?
@@ -48,6 +58,7 @@ private struct LocalNetwork: Decodable {
     let id: String?
     let nwid: String?
     let name: String?
+    let status: String?
     let assignedAddresses: [String]?
     let routes: [LocalRoute]?
 }

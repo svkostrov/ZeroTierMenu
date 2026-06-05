@@ -6,10 +6,8 @@ import ServiceManagement
 @MainActor
 @Observable
 final class NetworkStore {
-    var networkID = "a581878f7d73f059"
-    var networkName = "Rokot_net"
-    var localIPv4: String?
-    var subnetCIDR: String?
+    var networks: [LocalNetworkContext] = []
+    var selectedNetworkIDForUI = ""
     var isLoading = false
     var statusMessage = ""
     var statusIsError = false
@@ -23,9 +21,25 @@ final class NetworkStore {
 
     var emptyStateDescription: String {
         if isLoading {
-            return "Сканирую ZeroTier-подсеть..."
+            return "Сканирую ZeroTier-сети..."
         }
-        return "Не нашёл живые хосты в подсети или не удалось определить диапазон сети."
+        return "Не нашёл живые хосты или не удалось определить активные ZeroTier-сети."
+    }
+
+    var primaryNetworkLabel: String {
+        guard let network = networks.first else { return "" }
+        return network.name.isEmpty ? network.networkID : network.name
+    }
+
+    var selectedNetworkContext: LocalNetworkContext? {
+        if let selected = networks.first(where: { $0.networkID == selectedNetworkIDForUI }) {
+            return selected
+        }
+        return networks.first
+    }
+
+    var hasMultipleNetworks: Bool {
+        networks.count > 1
     }
 
     private let localService = LocalZeroTierService()
@@ -41,16 +55,22 @@ final class NetworkStore {
     }
 
     func loadLocalNetworkContext() async {
-        guard let context = await localService.loadNetworkContext(networkID: networkID) else {
+        let loadedNetworks = await localService.loadNetworkContexts()
+        guard !loadedNetworks.isEmpty else {
+            networks = []
             setStatus("Не удалось прочитать локальные параметры ZeroTier.", isError: true)
             return
         }
 
-        if !context.name.isEmpty {
-            networkName = context.name
+        networks = loadedNetworks.sorted {
+            let left = $0.name.isEmpty ? $0.networkID : $0.name
+            let right = $1.name.isEmpty ? $1.networkID : $1.name
+            return left.localizedCaseInsensitiveCompare(right) == .orderedAscending
         }
-        localIPv4 = context.ipv4
-        subnetCIDR = context.subnet
+
+        if selectedNetworkIDForUI.isEmpty || !networks.contains(where: { $0.networkID == selectedNetworkIDForUI }) {
+            selectedNetworkIDForUI = networks.first?.networkID ?? ""
+        }
     }
 
     func refreshIfPossible() async {
@@ -58,18 +78,35 @@ final class NetworkStore {
     }
 
     func refreshHosts() async {
-        guard let subnetCIDR, !subnetCIDR.isEmpty else {
-            setStatus("Не удалось определить подсеть ZeroTier.", isError: true)
+        let scannableNetworks = networks.filter { network in
+            guard let subnet = network.subnet else { return false }
+            return !subnet.isEmpty
+        }
+
+        guard !scannableNetworks.isEmpty else {
+            hosts = []
+            setStatus("Не удалось определить подсети активных ZeroTier-сетей.", isError: true)
             return
         }
 
         isLoading = true
         defer { isLoading = false }
 
-        let scannedHosts = await scanner.scan(subnetCIDR: subnetCIDR, excluding: localIPv4)
+        var scannedHosts: [NetworkHost] = []
+        for network in scannableNetworks {
+            guard let subnetCIDR = network.subnet else { continue }
+            let foundHosts = await scanner.scan(
+                subnetCIDR: subnetCIDR,
+                excluding: network.ipv4,
+                networkID: network.networkID,
+                networkName: network.name
+            )
+            scannedHosts.append(contentsOf: foundHosts)
+        }
+
         let manualOnlyIPs = manualHosts
             .map(\.ip)
-            .filter { ip in !scannedHosts.contains(where: { $0.id == ip }) }
+            .filter { ip in !scannedHosts.contains(where: { $0.ipv4Addresses.contains(ip) }) }
         let probedManualHosts = await scanner.probe(hostIPs: manualOnlyIPs)
 
         var mergedHosts = Dictionary(uniqueKeysWithValues: scannedHosts.map { ($0.id, $0) })
@@ -81,11 +118,13 @@ final class NetworkStore {
             .map { host in
                 NetworkHost(
                     id: host.id,
+                    networkID: host.networkID,
+                    networkName: host.networkName,
                     displayName: preferredDisplayName(for: host),
                     resolvedName: host.resolvedName,
                     ipv4Addresses: host.ipv4Addresses,
                     isOnline: host.isOnline,
-                    isManual: manualHosts.contains(where: { $0.ip == host.id })
+                    isManual: host.isManual || manualHosts.contains(where: { $0.ip == host.ipv4Addresses.first })
                 )
             }
             .sorted {
@@ -105,7 +144,14 @@ final class NetworkStore {
     }
 
     func alias(for host: NetworkHost) -> String {
-        hostAliases[host.id] ?? ""
+        if let alias = hostAliases[host.id] {
+            return alias
+        }
+        if let ip = host.ipv4Addresses.first,
+           let manualName = manualHosts.first(where: { $0.ip == ip })?.name {
+            return manualName
+        }
+        return ""
     }
 
     func saveAlias(_ alias: String, for host: NetworkHost) {
@@ -120,6 +166,8 @@ final class NetworkStore {
             guard currentHost.id == host.id else { return currentHost }
             return NetworkHost(
                 id: currentHost.id,
+                networkID: currentHost.networkID,
+                networkName: currentHost.networkName,
                 displayName: preferredDisplayName(for: currentHost),
                 resolvedName: currentHost.resolvedName,
                 ipv4Addresses: currentHost.ipv4Addresses,
@@ -161,9 +209,12 @@ final class NetworkStore {
     }
 
     func removeManualHost(_ host: NetworkHost) {
-        manualHosts.removeAll { $0.ip == host.id }
+        let hostIP = host.ipv4Addresses.first ?? host.id
+        manualHosts.removeAll { $0.ip == hostIP }
         manualHostStore.saveHosts(manualHosts)
-        hosts.removeAll { $0.id == host.id }
+        hosts = hosts.filter { currentHost in
+            currentHost.id != host.id || !currentHost.isManual
+        }
         setStatus("Ручной хост удалён.", isError: false)
     }
 
@@ -190,11 +241,12 @@ final class NetworkStore {
         if let alias = hostAliases[host.id], !alias.isEmpty {
             return alias
         }
-        if let manualName = manualHosts.first(where: { $0.ip == host.id })?.name,
+        if let hostIP = host.ipv4Addresses.first,
+           let manualName = manualHosts.first(where: { $0.ip == hostIP })?.name,
            !manualName.isEmpty {
             return manualName
         }
-        return host.resolvedName ?? host.id
+        return host.resolvedName ?? host.ipv4Addresses.first ?? host.id
     }
 
     private func isValidIPv4(_ ip: String) -> Bool {

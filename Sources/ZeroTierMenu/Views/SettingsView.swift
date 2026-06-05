@@ -6,17 +6,26 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Сеть") {
-                TextField("Network ID", text: $store.networkID)
-                    .textFieldStyle(.roundedBorder)
-                Text("Сейчас предзаполнена ваша сеть из ссылки.")
+                Text(store.networks.isEmpty ? "Активные сети не найдены" : "\(store.networks.count)")
+                    .textSelection(.enabled)
+                Text("Приложение автоматически находит все активные ZeroTier-сети на этом Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Section("Сканирование") {
-                Text(store.subnetCIDR ?? "Подсеть пока не определена")
-                    .textSelection(.enabled)
-                Text("Приложение сканирует живые IP в локальной ZeroTier-подсети. Имена будут видны только там, где работает reverse DNS.")
+                if store.networks.isEmpty {
+                    Text("Подсети пока не определены")
+                } else {
+                    ForEach(store.networks) { network in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(network.name.isEmpty ? network.networkID : network.name)
+                            Text(network.subnet ?? "Подсеть не определена")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Text("Приложение сканирует живые IP во всех активных ZeroTier-подсетях. Имена будут видны только там, где работает reverse DNS.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

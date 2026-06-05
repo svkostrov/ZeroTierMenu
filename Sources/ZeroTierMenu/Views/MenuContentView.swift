@@ -17,26 +17,59 @@ struct MenuContentView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(store.networkName.isEmpty ? "ZeroTier Network" : store.networkName)
+            Text(store.hasMultipleNetworks ? "ZeroTier Networks" : (store.primaryNetworkLabel.isEmpty ? "ZeroTier Network" : store.primaryNetworkLabel))
                 .font(.headline)
 
-            Link(destination: URL(string: "https://central.zerotier.com/network/\(store.networkID)")!) {
-                Text(store.networkID)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.blue)
-            }
-            .buttonStyle(.plain)
-
-            if let localIPv4 = store.localIPv4 {
-                Text("Этот Mac: \(localIPv4)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if store.hasMultipleNetworks {
+                Picker("Сеть", selection: $store.selectedNetworkIDForUI) {
+                    ForEach(store.networks) { network in
+                        Text(network.name.isEmpty ? network.networkID : network.name)
+                            .tag(network.networkID)
+                    }
+                }
+                .pickerStyle(.menu)
             }
 
-            if let subnetCIDR = store.subnetCIDR {
-                Text("Подсеть: \(subnetCIDR)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if let selectedNetwork = store.selectedNetworkContext {
+                Link(destination: URL(string: "https://central.zerotier.com/network/\(selectedNetwork.networkID)")!) {
+                    Text(selectedNetwork.networkID)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if store.hasMultipleNetworks {
+                ForEach(store.networks) { network in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(network.name.isEmpty ? network.networkID : network.name)
+                            .font(.caption.weight(.medium))
+
+                        if let localIPv4 = network.ipv4 {
+                            Text("Этот Mac: \(localIPv4)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let subnetCIDR = network.subnet {
+                            Text("Подсеть: \(subnetCIDR)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } else if let network = store.networks.first {
+                if let localIPv4 = network.ipv4 {
+                    Text("Этот Mac: \(localIPv4)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let subnetCIDR = network.subnet {
+                    Text("Подсеть: \(subnetCIDR)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -49,7 +82,7 @@ struct MenuContentView: View {
                         await store.refreshHosts()
                     }
                 }
-                .disabled(store.isLoading || store.subnetCIDR == nil)
+                .disabled(store.isLoading)
 
                 if store.isLoading {
                     ProgressView()

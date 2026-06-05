@@ -47,6 +47,16 @@ struct HostRowView: View {
                 }
             }
 
+            if let networkName = host.networkName, !networkName.isEmpty {
+                Text(networkName)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else if let networkID = host.networkID, !networkID.isEmpty {
+                Text(networkID)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
             ForEach(host.ipv4Addresses, id: \.self) { address in
                 Button {
                     copyAction(address)
