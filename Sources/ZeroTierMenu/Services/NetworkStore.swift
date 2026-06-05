@@ -19,9 +19,6 @@ final class NetworkStore {
     var manualHostNameDraft = ""
     var launchAtLoginEnabled = false
     var autoScanEnabled = true
-    var autoScanHours = 0
-    var autoScanMinutes = 1
-    var autoScanSeconds = 0
 
     var emptyStateDescription: String {
         if isLoading {
@@ -59,9 +56,6 @@ final class NetworkStore {
     init() {
         let config = configStore.loadConfig()
         autoScanEnabled = config.autoScanEnabled
-        autoScanHours = config.autoScanHours
-        autoScanMinutes = config.autoScanMinutes
-        autoScanSeconds = config.autoScanSeconds
         hostAliases = aliasStore.loadAliases()
         manualHosts = manualHostStore.loadHosts()
         launchAtLoginEnabled = launchAtLoginService.isEnabled()
@@ -275,31 +269,13 @@ final class NetworkStore {
         setStatus(enabled ? "Автосканирование включено." : "Автосканирование выключено.", isError: false)
     }
 
-    func setAutoScanHours(_ value: Int) {
-        autoScanHours = min(max(value, 0), 23)
-        normalizeAutoScanInterval()
-        saveAutoScanSettings()
-    }
-
-    func setAutoScanMinutes(_ value: Int) {
-        autoScanMinutes = min(max(value, 0), 59)
-        normalizeAutoScanInterval()
-        saveAutoScanSettings()
-    }
-
-    func setAutoScanSeconds(_ value: Int) {
-        autoScanSeconds = min(max(value, 0), 59)
-        normalizeAutoScanInterval()
-        saveAutoScanSettings()
-    }
-
     private func setStatus(_ message: String, isError: Bool) {
         statusMessage = message
         statusIsError = isError
     }
 
     private var autoScanIntervalSeconds: Int {
-        max((autoScanHours * 3600) + (autoScanMinutes * 60) + autoScanSeconds, 1)
+        60
     }
 
     private func startAutoScanLoopIfNeeded() {
@@ -317,19 +293,9 @@ final class NetworkStore {
         }
     }
 
-    private func normalizeAutoScanInterval() {
-        if autoScanHours == 0, autoScanMinutes == 0, autoScanSeconds == 0 {
-            autoScanSeconds = 1
-        }
-    }
-
     private func saveAutoScanSettings() {
-        normalizeAutoScanInterval()
         var config = configStore.loadConfig()
         config.autoScanEnabled = autoScanEnabled
-        config.autoScanHours = autoScanHours
-        config.autoScanMinutes = autoScanMinutes
-        config.autoScanSeconds = autoScanSeconds
         configStore.saveConfig(config)
     }
 
