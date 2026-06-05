@@ -68,13 +68,13 @@ struct HostRowView: View {
                     HStack {
                         Text(address)
                             .font(.system(.caption2, design: .monospaced))
-                        Spacer()
                         Image(systemName: "doc.on.doc")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             HStack {
