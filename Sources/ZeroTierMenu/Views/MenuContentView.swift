@@ -4,6 +4,17 @@ import SwiftUI
 struct MenuContentView: View {
     @Bindable var store: NetworkStore
 
+    private var hostListHeight: CGFloat {
+        if store.hosts.isEmpty {
+            return 140
+        }
+
+        let rowHeight: CGFloat = 36
+        let rowSpacing: CGFloat = 6
+        let rows = CGFloat(store.hosts.count)
+        return (rows * rowHeight) + (max(rows - 1, 0) * rowSpacing)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -162,7 +173,7 @@ struct MenuContentView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 300, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: hostListHeight, idealHeight: hostListHeight, maxHeight: hostListHeight, alignment: .topLeading)
     }
 
     private var footerSection: some View {

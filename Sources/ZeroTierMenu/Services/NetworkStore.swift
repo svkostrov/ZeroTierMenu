@@ -44,6 +44,21 @@ final class NetworkStore {
         centralSession.currentURL?.absoluteString
     }
 
+    var popupHeight: CGFloat {
+        let topAndBottomChromeHeight: CGFloat = 185
+        let rowHeight: CGFloat = 36
+        let rowSpacing: CGFloat = 6
+        let emptyHeight: CGFloat = 140
+
+        if hosts.isEmpty {
+            return topAndBottomChromeHeight + emptyHeight
+        }
+
+        let rows = CGFloat(hosts.count)
+        let listHeight = (rows * rowHeight) + (max(rows - 1, 0) * rowSpacing)
+        return topAndBottomChromeHeight + listHeight
+    }
+
     private var didBootstrap = false
     private var autoScanTask: Task<Void, Never>?
     private var lastScanAt: Date?
