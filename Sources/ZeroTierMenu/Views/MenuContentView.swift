@@ -76,7 +76,7 @@ struct MenuContentView: View {
     private var scanSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Button("Войти в Central") {
+                Button("Войти") {
                     store.showCentralAuthWindow()
                 }
                 .controlSize(.small)
