@@ -81,7 +81,7 @@ struct MenuContentView: View {
                 }
                 .controlSize(.small)
 
-                Button("Обновить Central") {
+                Button("Обновить") {
                     Task {
                         await store.refreshHosts()
                     }
