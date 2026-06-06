@@ -5,21 +5,18 @@ struct HostRowView: View {
     let initialAlias: String
     let copyAction: (String) -> Void
     let saveAliasAction: (String) -> Void
-    let removeManualHostAction: () -> Void
     @State private var aliasDraft: String
 
     init(
         host: NetworkHost,
         initialAlias: String,
         copyAction: @escaping (String) -> Void,
-        saveAliasAction: @escaping (String) -> Void,
-        removeManualHostAction: @escaping () -> Void
+        saveAliasAction: @escaping (String) -> Void
     ) {
         self.host = host
         self.initialAlias = initialAlias
         self.copyAction = copyAction
         self.saveAliasAction = saveAliasAction
-        self.removeManualHostAction = removeManualHostAction
         _aliasDraft = State(initialValue: initialAlias.isEmpty ? host.displayName : initialAlias)
     }
 
@@ -68,60 +65,14 @@ struct HostRowView: View {
                 }
             }
 
-            HStack {
-                if let networkName = host.networkName, !networkName.isEmpty {
-                    Text(networkName)
+            if let operatingSystem = host.operatingSystem, !operatingSystem.isEmpty {
+                HStack(spacing: 10) {
+                    Text("OS: \(operatingSystem)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                } else if let networkID = host.networkID, !networkID.isEmpty {
-                    Text(networkID)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
+
+                    Spacer()
                 }
-
-                Spacer()
-
-                if host.isManual {
-                    Text("manual")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            ForEach(Array(host.ipv4Addresses.dropFirst()), id: \.self) { address in
-                Button {
-                    copyAction(address)
-                } label: {
-                    HStack {
-                        Text(address)
-                            .font(.system(.caption2, design: .monospaced))
-                        Image(systemName: "doc.on.doc")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            HStack {
-                if host.resolvedName != nil {
-                    Button("Сбросить") {
-                        aliasDraft = host.displayName
-                        saveAliasAction("")
-                    }
-                    .controlSize(.small)
-                    .disabled(initialAlias.isEmpty)
-                }
-
-                if host.isManual {
-                    Button("Удалить хост") {
-                        removeManualHostAction()
-                    }
-                    .controlSize(.small)
-                }
-
-                Spacer()
             }
         }
         .padding(.horizontal, 9)

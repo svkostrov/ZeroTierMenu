@@ -10,10 +10,14 @@ struct MenuContentView: View {
             scanSection
             statusSection
             hostList
-            manualHostSection
             footerSection
         }
         .padding(12)
+        .onAppear {
+            Task {
+                await store.menuDidAppear()
+            }
+        }
     }
 
     private var header: some View {
@@ -72,13 +76,25 @@ struct MenuContentView: View {
     private var scanSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Button("Сканировать сеть") {
+                Button("Войти в Central") {
+                    store.showCentralAuthWindow()
+                }
+                .controlSize(.small)
+
+                Button("Обновить Central") {
                     Task {
                         await store.refreshHosts()
                     }
                 }
                 .controlSize(.small)
                 .disabled(store.isLoading)
+
+                Button("Сбросить") {
+                    Task {
+                        await store.clearCentralSession()
+                    }
+                }
+                .controlSize(.small)
 
                 if store.isLoading {
                     ProgressView()
@@ -101,6 +117,10 @@ struct MenuContentView: View {
 
     private var statusSection: some View {
         VStack(alignment: .leading, spacing: 3) {
+            Text(store.centralSessionState.title)
+                .font(.caption)
+                .foregroundStyle(store.centralSessionState == .needsLogin ? .orange : .secondary)
+
             if !store.statusMessage.isEmpty {
                 Text(store.statusMessage)
                     .font(.caption)
@@ -135,9 +155,6 @@ struct MenuContentView: View {
                                 },
                                 saveAliasAction: { alias in
                                     store.saveAlias(alias, for: host)
-                                },
-                                removeManualHostAction: {
-                                    store.removeManualHost(host)
                                 }
                             )
                         }
@@ -146,34 +163,6 @@ struct MenuContentView: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 300, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private var manualHostSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Добавить хост вручную")
-                .font(.caption.weight(.semibold))
-
-            HStack(spacing: 8) {
-                TextField("IPv4 адрес", text: $store.manualHostIPDraft)
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("Имя хоста", text: $store.manualHostNameDraft)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            HStack {
-                Button("Добавить") {
-                    store.addManualHost()
-                    Task {
-                        await store.refreshHosts()
-                    }
-                }
-                .controlSize(.small)
-                .disabled(store.manualHostIPDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                Spacer()
-            }
-        }
     }
 
     private var footerSection: some View {

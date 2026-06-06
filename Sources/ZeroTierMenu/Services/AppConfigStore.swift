@@ -4,7 +4,6 @@ struct AppConfigStore {
     private let fileManager = FileManager.default
     private let defaults = UserDefaults.standard
     private let legacyAliasesKey = "hostAliases"
-    private let legacyManualHostsKey = "manualHosts"
 
     func loadConfig() -> AppConfig {
         if let data = try? Data(contentsOf: configURL),
@@ -13,8 +12,7 @@ struct AppConfigStore {
         }
 
         let migrated = AppConfig(
-            hostAliases: defaults.dictionary(forKey: legacyAliasesKey) as? [String: String] ?? [:],
-            manualHosts: loadLegacyManualHosts()
+            hostAliases: defaults.dictionary(forKey: legacyAliasesKey) as? [String: String] ?? [:]
         )
 
         saveConfig(migrated)
@@ -44,14 +42,6 @@ struct AppConfigStore {
     private func ensureConfigDirectoryExists() throws {
         let directoryURL = configURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-    }
-
-    private func loadLegacyManualHosts() -> [SavedManualHost] {
-        guard let data = defaults.data(forKey: legacyManualHostsKey),
-              let hosts = try? JSONDecoder().decode([SavedManualHost].self, from: data) else {
-            return []
-        }
-        return hosts
     }
 }
 

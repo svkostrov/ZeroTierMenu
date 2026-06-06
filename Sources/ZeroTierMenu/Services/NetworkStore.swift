@@ -13,17 +13,15 @@ final class NetworkStore {
     var hosts: [NetworkHost] = []
     var lastCopiedIPv4: String?
     var hostAliases: [String: String] = [:]
-    var manualHosts: [SavedManualHost] = []
-    var manualHostIPDraft = ""
-    var manualHostNameDraft = ""
     var launchAtLoginEnabled = false
     var autoScanEnabled = true
+    var centralSessionState: CentralSessionState = .unknown
 
     var emptyStateDescription: String {
         if isLoading {
-            return "Сканирую ZeroTier-сети..."
+            return "Получаю список хостов из ZeroTier Central..."
         }
-        return "Не нашёл живые хосты или не удалось определить активные ZeroTier-сети."
+        return "Пока не удалось получить список хостов из ZeroTier Central."
     }
 
     var primaryNetworkLabel: String {
@@ -42,21 +40,25 @@ final class NetworkStore {
         networks.count > 1
     }
 
+    var centralBrowserURLText: String? {
+        centralSession.currentURL?.absoluteString
+    }
+
     private var didBootstrap = false
     private var autoScanTask: Task<Void, Never>?
     private var lastScanAt: Date?
     private let localService = LocalZeroTierService()
     private let scanner = NetworkScannerService()
     private let aliasStore = HostAliasStore()
-    private let manualHostStore = ManualHostStore()
     private let launchAtLoginService = LaunchAtLoginService()
     private let configStore = AppConfigStore()
+    private var centralAuthWindowController: CentralAuthWindowController?
+    let centralSession = CentralBrowserSession()
 
     init() {
         let config = configStore.loadConfig()
         autoScanEnabled = config.autoScanEnabled
         hostAliases = aliasStore.loadAliases()
-        manualHosts = manualHostStore.loadHosts()
         launchAtLoginEnabled = launchAtLoginService.isEnabled()
     }
 
@@ -64,6 +66,7 @@ final class NetworkStore {
         guard !didBootstrap else { return }
         didBootstrap = true
         await loadLocalNetworkContext()
+        await refreshCentralSessionState()
         await refreshIfPossible()
         startAutoScanLoopIfNeeded()
     }
@@ -91,17 +94,21 @@ final class NetworkStore {
         await refreshHosts()
     }
 
+    func menuDidAppear() async {
+        await refreshCentralSessionState()
+        guard centralSessionState == .authenticated else { return }
+        await refreshHosts()
+    }
+
     func refreshHosts() async {
         guard !isLoading else { return }
+        await refreshHostsFromCentral()
+    }
 
-        let scannableNetworks = networks.filter { network in
-            guard let subnet = network.subnet else { return false }
-            return !subnet.isEmpty
-        }
-
-        guard !scannableNetworks.isEmpty else {
+    private func refreshHostsFromCentral() async {
+        guard let selectedNetwork = selectedNetworkContext else {
             hosts = []
-            setStatus("Не удалось определить подсети активных ZeroTier-сетей.", isError: true)
+            setStatus("Сначала нужно выбрать локальную ZeroTier сеть.", isError: true)
             return
         }
 
@@ -111,48 +118,51 @@ final class NetworkStore {
             lastScanAt = Date()
         }
 
-        var scannedHosts: [NetworkHost] = []
-        for network in scannableNetworks {
-            guard let subnetCIDR = network.subnet else { continue }
-            let foundHosts = await scanner.scan(
-                subnetCIDR: subnetCIDR,
-                excluding: network.ipv4,
-                networkID: network.networkID,
-                networkName: network.name
-            )
-            scannedHosts.append(contentsOf: foundHosts)
-        }
+        do {
+            let members = try await centralSession.fetchMembers(networkID: selectedNetwork.networkID)
+            centralSessionState = .authenticated
+            let allIPs = Array(Set(members.flatMap(\.ipv4Addresses))).sorted()
+            let statuses = await scanner.reachability(hostIPs: allIPs)
 
-        let manualOnlyIPs = manualHosts
-            .map(\.ip)
-            .filter { ip in !scannedHosts.contains(where: { $0.ipv4Addresses.contains(ip) }) }
-        let probedManualHosts = await scanner.probe(hostIPs: manualOnlyIPs)
+            hosts = members
+                .filter { !$0.ipv4Addresses.isEmpty }
+                .map { member in
+                    let preferredName = hostAliases[member.id]
+                        ?? member.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let fallbackName = preferredName?.isEmpty == false ? preferredName! : (member.ipv4Addresses.first ?? member.id)
 
-        var mergedHosts = Dictionary(uniqueKeysWithValues: scannedHosts.map { ($0.id, $0) })
-        for host in probedManualHosts {
-            mergedHosts[host.id] = host
-        }
-
-        hosts = mergedHosts.values
-            .map { host in
-                NetworkHost(
-                    id: host.id,
-                    networkID: host.networkID,
-                    networkName: host.networkName,
-                    displayName: preferredDisplayName(for: host),
-                    resolvedName: host.resolvedName,
-                    ipv4Addresses: host.ipv4Addresses,
-                    isOnline: host.isOnline,
-                    isManual: host.isManual || manualHosts.contains(where: { $0.ip == host.ipv4Addresses.first })
-                )
-            }
-            .sorted {
-                if $0.isOnline != $1.isOnline {
-                    return $0.isOnline && !$1.isOnline
+                    return NetworkHost(
+                        id: member.id,
+                        networkID: selectedNetwork.networkID,
+                        networkName: selectedNetwork.name,
+                        displayName: fallbackName,
+                        resolvedName: member.name,
+                        ipv4Addresses: member.ipv4Addresses,
+                        isOnline: member.ipv4Addresses.contains { statuses[$0] == true },
+                        lastActiveText: formattedLastActive(member.lastSeenTime),
+                        operatingSystem: member.operatingSystem?.uppercased()
+                    )
                 }
-                return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+                .sorted {
+                    if $0.isOnline != $1.isOnline {
+                        return $0.isOnline && !$1.isOnline
+                    }
+                    return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+                }
+
+            setStatus("Получено хостов из Central: \(hosts.count)", isError: false)
+        } catch {
+            hosts = []
+            if case CentralBrowserSessionError.unauthorized = error {
+                centralSessionState = .needsLogin
+            } else if let error = error as? CentralBrowserSessionError,
+                      case .unauthorized = error {
+                centralSessionState = .needsLogin
+            } else {
+                centralSessionState = .unknown
             }
-        setStatus("Найдено живых хостов: \(hosts.count)", isError: false)
+            setStatus("Не удалось получить хосты из Central: \(error.localizedDescription)", isError: true)
+        }
     }
 
     func copyIPv4(_ ipv4: String) {
@@ -166,16 +176,11 @@ final class NetworkStore {
         if let alias = hostAliases[host.id] {
             return alias
         }
-        if let ip = host.ipv4Addresses.first,
-           let manualName = manualHosts.first(where: { $0.ip == ip })?.name {
-            return manualName
-        }
         return ""
     }
 
     func saveAlias(_ alias: String, for host: NetworkHost) {
         let trimmed = alias.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hostIP = host.ipv4Addresses.first
 
         if trimmed.isEmpty {
             hostAliases.removeValue(forKey: host.id)
@@ -183,14 +188,6 @@ final class NetworkStore {
             hostAliases[host.id] = trimmed
         }
         aliasStore.saveAliases(hostAliases)
-
-        if host.isManual, let hostIP {
-            manualHosts = manualHosts.map { currentHost in
-                guard currentHost.ip == hostIP else { return currentHost }
-                return SavedManualHost(ip: currentHost.ip, name: trimmed)
-            }
-            manualHostStore.saveHosts(manualHosts)
-        }
 
         hosts = hosts.map { currentHost in
             guard currentHost.id == host.id else { return currentHost }
@@ -202,50 +199,11 @@ final class NetworkStore {
                 resolvedName: currentHost.resolvedName,
                 ipv4Addresses: currentHost.ipv4Addresses,
                 isOnline: currentHost.isOnline,
-                isManual: currentHost.isManual
+                lastActiveText: currentHost.lastActiveText,
+                operatingSystem: currentHost.operatingSystem
             )
         }
         setStatus(trimmed.isEmpty ? "Пользовательское имя удалено." : "Имя хоста сохранено.", isError: false)
-    }
-
-    func addManualHost() {
-        let ip = manualHostIPDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = manualHostNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard isValidIPv4(ip) else {
-            setStatus("Введите корректный IPv4 адрес.", isError: true)
-            return
-        }
-
-        if !manualHosts.contains(where: { $0.ip == ip }) {
-            manualHosts.append(SavedManualHost(ip: ip, name: name))
-        } else {
-            manualHosts = manualHosts.map { host in
-                host.ip == ip ? SavedManualHost(ip: ip, name: name) : host
-            }
-        }
-
-        manualHosts.sort { $0.ip < $1.ip }
-        manualHostStore.saveHosts(manualHosts)
-
-        if !name.isEmpty {
-            hostAliases[ip] = name
-            aliasStore.saveAliases(hostAliases)
-        }
-
-        manualHostIPDraft = ""
-        manualHostNameDraft = ""
-        setStatus("Хост добавлен вручную.", isError: false)
-    }
-
-    func removeManualHost(_ host: NetworkHost) {
-        let hostIP = host.ipv4Addresses.first ?? host.id
-        manualHosts.removeAll { $0.ip == hostIP }
-        manualHostStore.saveHosts(manualHosts)
-        hosts = hosts.filter { currentHost in
-            currentHost.id != host.id || !currentHost.isManual
-        }
-        setStatus("Ручной хост удалён.", isError: false)
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -265,7 +223,45 @@ final class NetworkStore {
     func setAutoScanEnabled(_ enabled: Bool) {
         autoScanEnabled = enabled
         saveAutoScanSettings()
-        setStatus(enabled ? "Автосканирование включено." : "Автосканирование выключено.", isError: false)
+        setStatus(enabled ? "Автообновление включено." : "Автообновление выключено.", isError: false)
+    }
+
+    func loadCentralLoginPage() {
+        centralSession.loadLogin(networkID: selectedNetworkContext?.networkID)
+    }
+
+    func reloadCentralLoginPage() {
+        if let networkID = selectedNetworkContext?.networkID {
+            centralSession.reloadNetwork(networkID: networkID)
+        } else {
+            centralSession.loadLogin(networkID: nil)
+        }
+    }
+
+    func refreshCentralSessionState() async {
+        centralSessionState = await centralSession.hasCentralCookies() ? .authenticated : .needsLogin
+    }
+
+    func clearCentralSession() async {
+        await centralSession.clearSession()
+        centralSessionState = .needsLogin
+        hosts = []
+        setStatus("Сессия Central сброшена.", isError: false)
+    }
+
+    func showCentralAuthWindow() {
+        if centralAuthWindowController == nil {
+            centralAuthWindowController = CentralAuthWindowController(store: self)
+        }
+        centralAuthWindowController?.show()
+    }
+
+    func closeCentralAuthWindow() {
+        centralAuthWindowController?.close()
+    }
+
+    func centralAuthWindowDidClose() {
+        centralAuthWindowController = nil
     }
 
     private func setStatus(_ message: String, isError: Bool) {
@@ -302,20 +298,27 @@ final class NetworkStore {
         if let alias = hostAliases[host.id], !alias.isEmpty {
             return alias
         }
-        if let hostIP = host.ipv4Addresses.first,
-           let manualName = manualHosts.first(where: { $0.ip == hostIP })?.name,
-           !manualName.isEmpty {
-            return manualName
-        }
         return host.resolvedName ?? host.ipv4Addresses.first ?? host.id
     }
 
-    private func isValidIPv4(_ ip: String) -> Bool {
-        let parts = ip.split(separator: ".")
-        guard parts.count == 4 else { return false }
-        return parts.allSatisfy { part in
-            guard let octet = UInt8(part) else { return false }
-            return String(octet) == part
+    private func formattedLastActive(_ rawValue: String?) -> String? {
+        guard let rawValue,
+              !rawValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
         }
+
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let fallbackISOFormatter = ISO8601DateFormatter()
+        fallbackISOFormatter.formatOptions = [.withInternetDateTime]
+
+        let date = isoFormatter.date(from: rawValue) ?? fallbackISOFormatter.date(from: rawValue)
+        guard let date else { return rawValue }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "dd.MM HH:mm"
+        return formatter.string(from: date)
     }
 }

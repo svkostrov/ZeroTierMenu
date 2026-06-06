@@ -8,5 +8,6 @@ struct NetworkHost: Identifiable, Equatable {
     let resolvedName: String?
     let ipv4Addresses: [String]
     let isOnline: Bool
-    let isManual: Bool
+    let lastActiveText: String?
+    let operatingSystem: String?
 }

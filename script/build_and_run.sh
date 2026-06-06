@@ -16,6 +16,8 @@ APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 ICONSET_DIR="$ROOT_DIR/Assets/AppIcon.iconset"
 ICNS_FILE="$ROOT_DIR/Assets/AppIcon.icns"
+INSTALL_DIR="/Applications"
+INSTALLED_APP="$INSTALL_DIR/$APP_NAME.app"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
@@ -57,8 +59,11 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+rm -rf "$INSTALLED_APP"
+cp -R "$APP_BUNDLE" "$INSTALL_DIR/"
+
 open_app() {
-  /usr/bin/open -n "$APP_BUNDLE"
+  /usr/bin/open -n "$INSTALLED_APP"
 }
 
 case "$MODE" in
@@ -66,7 +71,7 @@ case "$MODE" in
     open_app
     ;;
   --debug|debug)
-    lldb -- "$APP_BINARY"
+    lldb -- "$INSTALLED_APP/Contents/MacOS/$APP_NAME"
     ;;
   --logs|logs)
     open_app

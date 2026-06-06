@@ -5,6 +5,12 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("Central") {
+                Text("Приложение получает участников сети из ZeroTier Central через встроенный WKWebView, а доступность хостов определяет ping.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Сеть") {
                 Text(store.networks.isEmpty ? "Активные сети не найдены" : "\(store.networks.count)")
                     .textSelection(.enabled)
@@ -13,19 +19,8 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Сканирование") {
-                if store.networks.isEmpty {
-                    Text("Подсети пока не определены")
-                } else {
-                    ForEach(store.networks) { network in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(network.name.isEmpty ? network.networkID : network.name)
-                            Text(network.subnet ?? "Подсеть не определена")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                Text("Приложение сканирует живые IP во всех активных ZeroTier-подсетях. Имена будут видны только там, где работает reverse DNS.")
+            Section("Обновление") {
+                Text("Откройте авторизацию Central, войдите подходящим способом и затем обновите список хостов.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
