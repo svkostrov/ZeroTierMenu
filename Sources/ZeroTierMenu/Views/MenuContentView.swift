@@ -5,14 +5,7 @@ struct MenuContentView: View {
     @Bindable var store: NetworkStore
 
     private var hostListHeight: CGFloat {
-        if store.hosts.isEmpty {
-            return 140
-        }
-
-        let rowHeight: CGFloat = 36
-        let rowSpacing: CGFloat = 6
-        let rows = CGFloat(store.hosts.count)
-        return (rows * rowHeight) + (max(rows - 1, 0) * rowSpacing)
+        store.hostListHeight
     }
 
     var body: some View {

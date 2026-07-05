@@ -44,22 +44,28 @@ final class NetworkStore {
         centralSession.currentURL?.absoluteString
     }
 
+    /// Список растёт вместе с хостами; прокрутка появляется от 11 хостов и больше.
+    private let maxVisibleHostRows = 10
+
+    var hostListHeight: CGFloat {
+        let rowHeight: CGFloat = 58
+        let rowSpacing: CGFloat = 6
+        let emptyHeight: CGFloat = 140
+
+        if hosts.isEmpty {
+            return emptyHeight
+        }
+
+        let rows = CGFloat(min(hosts.count, maxVisibleHostRows))
+        return (rows * rowHeight) + (max(rows - 1, 0) * rowSpacing)
+    }
+
     var popupHeight: CGFloat {
         var topAndBottomChromeHeight: CGFloat = 185
         if hasMultipleNetworks {
             topAndBottomChromeHeight += 30 + (CGFloat(networks.count) * 34)
         }
-        let rowHeight: CGFloat = 36
-        let rowSpacing: CGFloat = 6
-        let emptyHeight: CGFloat = 140
-
-        if hosts.isEmpty {
-            return topAndBottomChromeHeight + emptyHeight
-        }
-
-        let rows = CGFloat(hosts.count)
-        let listHeight = (rows * rowHeight) + (max(rows - 1, 0) * rowSpacing)
-        return topAndBottomChromeHeight + listHeight
+        return topAndBottomChromeHeight + hostListHeight
     }
 
     private var didBootstrap = false
