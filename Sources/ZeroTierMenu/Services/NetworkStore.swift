@@ -45,7 +45,10 @@ final class NetworkStore {
     }
 
     var popupHeight: CGFloat {
-        let topAndBottomChromeHeight: CGFloat = 185
+        var topAndBottomChromeHeight: CGFloat = 185
+        if hasMultipleNetworks {
+            topAndBottomChromeHeight += 30 + (CGFloat(networks.count) * 34)
+        }
         let rowHeight: CGFloat = 36
         let rowSpacing: CGFloat = 6
         let emptyHeight: CGFloat = 140
@@ -80,10 +83,38 @@ final class NetworkStore {
     func bootstrap() async {
         guard !didBootstrap else { return }
         didBootstrap = true
+        centralSession.onNavigationFinished = { [weak self] url in
+            self?.handleCentralNavigationFinished(url: url)
+        }
         await loadLocalNetworkContext()
-        await refreshCentralSessionState()
-        await refreshIfPossible()
+        await autoLoginAndRefresh()
         startAutoScanLoopIfNeeded()
+    }
+
+    private func autoLoginAndRefresh() async {
+        setStatus("Восстанавливаю сессию Central...", isError: false)
+        await refreshHosts()
+        if centralSessionState == .needsLogin {
+            showCentralAuthWindow()
+        }
+    }
+
+    private func handleCentralNavigationFinished(url: URL?) {
+        guard let host = url?.host, host.contains("central.zerotier.com") else { return }
+        guard centralSessionState != .authenticated, !isLoading else { return }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.refreshHosts()
+            if self.centralSessionState == .authenticated {
+                self.closeCentralAuthWindow()
+            }
+        }
+    }
+
+    private func ensureCentralPageLoaded() async {
+        guard !centralSession.isOnCentralPage else { return }
+        await centralSession.loadAndWaitForPage(networkID: selectedNetworkContext?.networkID)
     }
 
     func loadLocalNetworkContext() async {
@@ -105,13 +136,10 @@ final class NetworkStore {
         }
     }
 
-    func refreshIfPossible() async {
-        await refreshHosts()
-    }
-
     func menuDidAppear() async {
-        await refreshCentralSessionState()
-        guard centralSessionState == .authenticated else { return }
+        guard !isLoading else { return }
+        let lastScan = lastScanAt ?? .distantPast
+        guard Date().timeIntervalSince(lastScan) >= 10 else { return }
         await refreshHosts()
     }
 
@@ -134,6 +162,7 @@ final class NetworkStore {
         }
 
         do {
+            await ensureCentralPageLoaded()
             let members = try await centralSession.fetchMembers(networkID: selectedNetwork.networkID)
             centralSessionState = .authenticated
             let allIPs = Array(Set(members.flatMap(\.ipv4Addresses))).sorted()
@@ -169,9 +198,6 @@ final class NetworkStore {
         } catch {
             hosts = []
             if case CentralBrowserSessionError.unauthorized = error {
-                centralSessionState = .needsLogin
-            } else if let error = error as? CentralBrowserSessionError,
-                      case .unauthorized = error {
                 centralSessionState = .needsLogin
             } else {
                 centralSessionState = .unknown
@@ -253,15 +279,13 @@ final class NetworkStore {
         }
     }
 
-    func refreshCentralSessionState() async {
-        centralSessionState = await centralSession.hasCentralCookies() ? .authenticated : .needsLogin
-    }
-
     func clearCentralSession() async {
         await centralSession.clearSession()
         centralSessionState = .needsLogin
         hosts = []
         setStatus("Сессия Central сброшена.", isError: false)
+        showCentralAuthWindow()
+        loadCentralLoginPage()
     }
 
     func showCentralAuthWindow() {

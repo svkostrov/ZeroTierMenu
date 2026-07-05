@@ -3,3 +3,5 @@ dist/
 .DS_Store
 Assets/AppIcon.icns
 Assets/AppIcon.iconset/
+.tmp_crashlogs/
+ZeroTierMenu.xcodeproj/

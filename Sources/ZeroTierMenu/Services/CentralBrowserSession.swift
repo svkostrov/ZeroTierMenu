@@ -16,7 +16,16 @@ final class CentralBrowserSession: NSObject {
     private(set) var currentURL: URL?
     private(set) var pageTitle = ""
     private(set) var isLoading = false
+    var onNavigationFinished: ((URL?) -> Void)?
+
     private var pendingFetchContinuation: CheckedContinuation<String, Error>?
+    private var currentFetchRequestID: UUID?
+    private var navigationWaiters: [NavigationWaiter] = []
+
+    var isOnCentralPage: Bool {
+        guard let host = webView.url?.host else { return false }
+        return host.contains("zerotier.com")
+    }
 
     override init() {
         let configuration = WKWebViewConfiguration()
@@ -44,6 +53,30 @@ final class CentralBrowserSession: NSObject {
 
     func reloadNetwork(networkID: String) {
         loadLogin(networkID: networkID)
+    }
+
+    func loadAndWaitForPage(networkID: String?, timeoutSeconds: Double = 20) async {
+        loadLogin(networkID: networkID)
+        await waitForNavigationEnd(timeoutSeconds: timeoutSeconds)
+    }
+
+    private func waitForNavigationEnd(timeoutSeconds: Double) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let waiter = NavigationWaiter(continuation)
+            navigationWaiters.append(waiter)
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(timeoutSeconds))
+                waiter.resume()
+            }
+        }
+    }
+
+    private func finishNavigationWaiters() {
+        let waiters = navigationWaiters
+        navigationWaiters = []
+        for waiter in waiters {
+            waiter.resume()
+        }
     }
 
     func fetchMembers(networkID: String) async throws -> [CentralMemberRecord] {
@@ -232,10 +265,13 @@ final class CentralBrowserSession: NSObject {
         return try parseMembers(from: payloadData, networkID: networkID)
     }
 
-    private func runScriptAndWaitForMessage(_ script: String) async throws -> String {
+    private func runScriptAndWaitForMessage(_ script: String, timeoutSeconds: Double = 15) async throws -> String {
         if pendingFetchContinuation != nil {
             throw CentralBrowserSessionError.requestAlreadyInFlight
         }
+
+        let requestID = UUID()
+        currentFetchRequestID = requestID
 
         return try await withCheckedThrowingContinuation { continuation in
             pendingFetchContinuation = continuation
@@ -243,8 +279,19 @@ final class CentralBrowserSession: NSObject {
                 if let error {
                     let pending = self.pendingFetchContinuation
                     self.pendingFetchContinuation = nil
+                    self.currentFetchRequestID = nil
                     pending?.resume(throwing: error)
                 }
+            }
+
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(timeoutSeconds))
+                guard let self,
+                      self.currentFetchRequestID == requestID,
+                      let pending = self.pendingFetchContinuation else { return }
+                self.pendingFetchContinuation = nil
+                self.currentFetchRequestID = nil
+                pending.resume(throwing: CentralBrowserSessionError.timedOut)
             }
         }
     }
@@ -383,16 +430,34 @@ extension CentralBrowserSession: WKNavigationDelegate {
         isLoading = false
         currentURL = webView.url
         pageTitle = webView.title ?? ""
+        finishNavigationWaiters()
+        onNavigationFinished?(webView.url)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         isLoading = false
         currentURL = webView.url
+        finishNavigationWaiters()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         isLoading = false
         currentURL = webView.url
+        finishNavigationWaiters()
+    }
+}
+
+@MainActor
+private final class NavigationWaiter {
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(_ continuation: CheckedContinuation<Void, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 
@@ -417,6 +482,7 @@ enum CentralBrowserSessionError: LocalizedError {
     case unsupportedJavaScriptResult
     case requestAlreadyInFlight
     case noMembersFoundOnPage
+    case timedOut
 
     var errorDescription: String? {
         switch self {
@@ -432,6 +498,8 @@ enum CentralBrowserSessionError: LocalizedError {
             return "Запрос к Central уже выполняется."
         case .noMembersFoundOnPage:
             return "Не удалось прочитать members со страницы Central."
+        case .timedOut:
+            return "Central не ответил вовремя."
         }
     }
 }

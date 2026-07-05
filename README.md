@@ -17,6 +17,31 @@
 - показывает статус хоста через цветную точку
 - умеет открывать страницу сети в ZeroTier Central по клику на `network id`
 
+## iOS companion
+
+В репозитории добавлен отдельный iOS target: `ZeroTierCompanion`.
+
+Что умеет:
+
+- входить в ZeroTier Central через встроенный `WKWebView`
+- хранить список `network id` вручную
+- загружать участников сети из Central
+- показывать имя хоста, IPv4, ОС и последнюю активность
+- сохранять пользовательские алиасы
+- копировать IPv4 по тапу
+
+Ограничения iOS-версии:
+
+- нет автоопределения локальных ZeroTier-сетей, потому что на iOS нет доступа к `zerotier-cli`
+- это companion app, он не поднимает сам ZeroTier-туннель на iPhone
+
+Запуск:
+
+```bash
+xcodegen generate
+open ZeroTierMenu.xcodeproj
+```
+
 ## Запуск
 
 ```bash
