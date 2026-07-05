@@ -4,8 +4,13 @@ import SwiftUI
 struct MenuContentView: View {
     @Bindable var store: NetworkStore
 
-    private var hostListHeight: CGFloat {
-        store.hostListHeight
+    private let maxVisibleHostRows = 10
+
+    private var scrollCapHeight: CGFloat {
+        let rowHeight: CGFloat = 52
+        let rowSpacing: CGFloat = 6
+        let rows = CGFloat(maxVisibleHostRows)
+        return (rows * rowHeight) + ((rows - 1) * rowSpacing) + (rowHeight / 2)
     }
 
     var body: some View {
@@ -139,34 +144,42 @@ struct MenuContentView: View {
         }
     }
 
+    @ViewBuilder
     private var hostList: some View {
-        Group {
-            if store.hosts.isEmpty {
-                ContentUnavailableView(
-                    "Хостов пока нет",
-                    systemImage: "desktopcomputer.trianglebadge.exclamationmark",
-                    description: Text(store.emptyStateDescription)
-                )
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(store.hosts) { host in
-                            HostRowView(
-                                host: host,
-                                initialAlias: store.alias(for: host),
-                                copyAction: { ipv4 in
-                                    store.copyIPv4(ipv4)
-                                },
-                                saveAliasAction: { alias in
-                                    store.saveAlias(alias, for: host)
-                                }
-                            )
-                        }
+        if store.hosts.isEmpty {
+            ContentUnavailableView(
+                "Хостов пока нет",
+                systemImage: "desktopcomputer.trianglebadge.exclamationmark",
+                description: Text(store.emptyStateDescription)
+            )
+            .frame(maxWidth: .infinity, minHeight: 140, alignment: .topLeading)
+        } else if store.hosts.count <= maxVisibleHostRows {
+            hostRows
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        } else {
+            ScrollView {
+                hostRows
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(height: scrollCapHeight)
+        }
+    }
+
+    private var hostRows: some View {
+        LazyVStack(alignment: .leading, spacing: 6) {
+            ForEach(store.hosts) { host in
+                HostRowView(
+                    host: host,
+                    initialAlias: store.alias(for: host),
+                    copyAction: { ipv4 in
+                        store.copyIPv4(ipv4)
+                    },
+                    saveAliasAction: { alias in
+                        store.saveAlias(alias, for: host)
                     }
-                }
+                )
             }
         }
-        .frame(maxWidth: .infinity, minHeight: hostListHeight, idealHeight: hostListHeight, maxHeight: hostListHeight, alignment: .topLeading)
     }
 
     private var footerSection: some View {

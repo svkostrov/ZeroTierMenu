@@ -24,7 +24,7 @@ struct ZeroTierMenuApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuContentView(store: store)
-                .frame(width: 335, height: store.popupHeight, alignment: .top)
+                .frame(width: 335, alignment: .top)
                 .task {
                     await store.bootstrap()
                 }
