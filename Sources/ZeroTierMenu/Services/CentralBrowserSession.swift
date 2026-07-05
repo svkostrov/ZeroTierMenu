@@ -35,9 +35,59 @@ final class CentralBrowserSession: NSObject {
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         configuration.userContentController.add(self, contentWorld: .page, name: "centralFetch")
+        let interceptor = WKUserScript(
+            source: Self.authHeaderInterceptorScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+        configuration.userContentController.addUserScript(interceptor)
         webView.navigationDelegate = self
         webView.uiDelegate = self
     }
+
+    private static let authHeaderInterceptorScript = """
+    (() => {
+      if (window.__ztFetchHooked) { return; }
+      window.__ztFetchHooked = true;
+      window.__ztAuthHeader = window.__ztAuthHeader || null;
+
+      const remember = (value) => {
+        if (value) { window.__ztAuthHeader = value; }
+      };
+
+      const readHeaders = (headers) => {
+        try {
+          if (!headers) { return null; }
+          if (typeof headers.get === "function") { return headers.get("authorization"); }
+          if (Array.isArray(headers)) {
+            const found = headers.find((pair) => String(pair[0]).toLowerCase() === "authorization");
+            return found ? found[1] : null;
+          }
+          for (const key of Object.keys(headers)) {
+            if (key.toLowerCase() === "authorization") { return headers[key]; }
+          }
+        } catch (error) {}
+        return null;
+      };
+
+      const originalFetch = window.fetch;
+      window.fetch = function(input, init) {
+        try {
+          remember(readHeaders(init && init.headers));
+          if (input && typeof input === "object" && input.headers) {
+            remember(readHeaders(input.headers));
+          }
+        } catch (error) {}
+        return originalFetch.apply(this, arguments);
+      };
+
+      const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+      XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+        if (String(name).toLowerCase() === "authorization") { remember(value); }
+        return originalSetRequestHeader.apply(this, arguments);
+      };
+    })();
+    """
 
     func loadLogin(networkID: String?) {
         let urlString: String
@@ -80,26 +130,78 @@ final class CentralBrowserSession: NSObject {
     }
 
     func fetchMembers(networkID: String) async throws -> [CentralMemberRecord] {
-        do {
-            let apiMembers = try await fetchMembersViaAPI(networkID: networkID)
-            if !apiMembers.isEmpty {
-                return apiMembers
+        var token = await validAuthToken()
+        if token == nil {
+            await loadAndWaitForPage(networkID: networkID)
+            token = await waitForAuthToken()
+        }
+
+        guard let token else {
+            if let domMembers = try? await fetchMembersFromVisiblePage(networkID: networkID),
+               !domMembers.isEmpty {
+                return domMembers
             }
+            throw CentralBrowserSessionError.unauthorized
+        }
+
+        do {
+            return try await fetchMembersViaAPI(networkID: networkID, token: token)
+        } catch CentralBrowserSessionError.unauthorized {
+            await loadAndWaitForPage(networkID: networkID)
+            guard let freshToken = await waitForAuthToken() else {
+                throw CentralBrowserSessionError.unauthorized
+            }
+            return try await fetchMembersViaAPI(networkID: networkID, token: freshToken)
         } catch {
             let domMembers = try await fetchMembersFromVisiblePage(networkID: networkID)
             if !domMembers.isEmpty {
                 return domMembers
             }
-
             throw error
         }
+    }
 
-        let domMembers = try await fetchMembersFromVisiblePage(networkID: networkID)
-        if !domMembers.isEmpty {
-            return domMembers
+    /// Токен нового Central UI: SPA кладёт JWT в localStorage.currentUser.authToken
+    /// и обновляет его по сессионной куке при загрузке страницы.
+    private func validAuthToken() async -> String? {
+        let script = """
+        (() => {
+          try {
+            const captured = window.__ztAuthHeader || null;
+            const raw = localStorage.getItem("currentUser");
+            const stored = raw ? (JSON.parse(raw).authToken || null) : null;
+            const isFresh = (token) => {
+              try {
+                const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+                return !payload.exp || payload.exp * 1000 > Date.now() + 30000;
+              } catch (error) { return false; }
+            };
+            if (stored && isFresh(stored)) { return stored; }
+            if (captured && isFresh(captured)) { return captured; }
+            return "";
+          } catch (error) { return ""; }
+        })();
+        """
+
+        let result: String? = await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(script) { value, _ in
+                continuation.resume(returning: value as? String)
+            }
         }
 
-        throw CentralBrowserSessionError.noMembersFoundOnPage
+        guard let result, !result.isEmpty else { return nil }
+        return result
+    }
+
+    private func waitForAuthToken(timeoutSeconds: Double = 12) async -> String? {
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while Date() < deadline {
+            if let token = await validAuthToken() {
+                return token
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        return nil
     }
 
     func clearSession() async {
@@ -148,14 +250,95 @@ final class CentralBrowserSession: NSObject {
         }
     }
 
-    private func fetchMembersViaAPI(networkID: String) async throws -> [CentralMemberRecord] {
+    func collectDiagnostics(networkID: String) async -> String {
+        let script = """
+        (async () => {
+          const report = {};
+          report.location = window.location.href;
+          report.resources = performance.getEntriesByType("resource")
+            .map((entry) => entry.name)
+            .filter((url) => url.includes("api") || url.includes("member") || url.includes("network"))
+            .slice(-50);
+
+          const candidates = [
+            "https://central.zerotier.com/api/v2/network/\(networkID)/member",
+            "https://central.zerotier.com/api/network/\(networkID)/member",
+            "https://central.zerotier.com/api/v1/network/\(networkID)/member",
+            "https://api.zerotier.com/api/v2/network/\(networkID)/member",
+            "https://api.zerotier.com/api/v1/network/\(networkID)/member"
+          ];
+
+          report.cookie = document.cookie;
+          report.localStorageKeys = Object.keys(localStorage);
+          report.sessionStorageKeys = Object.keys(sessionStorage);
+          report.storageSamples = {};
+          for (const key of report.localStorageKeys) {
+            const lower = key.toLowerCase();
+            if (lower.includes("token") || lower.includes("auth") || lower.includes("oidc") || lower.includes("user") || lower.includes("session")) {
+              report.storageSamples["ls:" + key] = String(localStorage.getItem(key)).slice(0, 300);
+            }
+          }
+          for (const key of report.sessionStorageKeys) {
+            const lower = key.toLowerCase();
+            if (lower.includes("token") || lower.includes("auth") || lower.includes("oidc") || lower.includes("user") || lower.includes("session")) {
+              report.storageSamples["ss:" + key] = String(sessionStorage.getItem(key)).slice(0, 300);
+            }
+          }
+          report.capturedAuthHeader = window.__ztAuthHeader || null;
+
+          report.probes = [];
+          for (const url of candidates) {
+            try {
+              const response = await fetch(url, {
+                credentials: "include",
+                headers: { accept: "application/json" }
+              });
+              const text = await response.text();
+              report.probes.push({
+                url,
+                status: response.status,
+                contentType: response.headers.get("content-type") || "",
+                body: text.slice(0, 400)
+              });
+            } catch (error) {
+              report.probes.push({ url, error: String(error) });
+            }
+          }
+
+          const payload = JSON.stringify({
+            kind: "diag",
+            ok: true,
+            status: 200,
+            url: window.location.href,
+            contentType: "application/json",
+            text: JSON.stringify(report)
+          });
+          window.webkit.messageHandlers.centralFetch.postMessage(payload);
+        })();
+        0;
+        """
+
+        do {
+            let jsonText = try await runScriptAndWaitForMessage(script, timeoutSeconds: 30)
+            guard let data = jsonText.data(using: .utf8),
+                  let envelope = try? JSONDecoder().decode(CentralFetchEnvelope.self, from: data) else {
+                return jsonText
+            }
+            return envelope.text
+        } catch {
+            return "diagnostics failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func fetchMembersViaAPI(networkID: String, token: String) async throws -> [CentralMemberRecord] {
         let script = """
         (() => {
           fetch("https://central.zerotier.com/api/v2/network/\(networkID)/member", {
             method: "GET",
             credentials: "include",
             headers: {
-              "accept": "application/json"
+              "accept": "application/json",
+              "authorization": "\(token)"
             }
           })
           .then(async (response) => {

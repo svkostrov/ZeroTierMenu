@@ -60,10 +60,6 @@ struct CentralAuthWindowView: View {
             CentralWebViewContainer(webView: store.centralSession.webView)
                 .frame(minWidth: 900, minHeight: 700)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
-
-            Text("После входа закройте окно и нажмите «Обновить Central» в режиме v2.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .padding(14)
         .onAppear {

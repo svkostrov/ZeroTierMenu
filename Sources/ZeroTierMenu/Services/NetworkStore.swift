@@ -203,7 +203,17 @@ final class NetworkStore {
                 centralSessionState = .unknown
             }
             setStatus("Не удалось получить хосты из Central: \(error.localizedDescription)", isError: true)
+            await writeCentralDiagnostics(networkID: selectedNetwork.networkID)
         }
+    }
+
+    private func writeCentralDiagnostics(networkID: String) async {
+        let report = await centralSession.collectDiagnostics(networkID: networkID)
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ZeroTierMenu", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appendingPathComponent("central_debug.json")
+        try? report.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
     func copyIPv4(_ ipv4: String) {
