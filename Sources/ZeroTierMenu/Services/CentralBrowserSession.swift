@@ -41,6 +41,12 @@ final class CentralBrowserSession: NSObject {
             forMainFrameOnly: false
         )
         configuration.userContentController.addUserScript(interceptor)
+        let rememberMe = WKUserScript(
+            source: Self.rememberMeScript,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: false
+        )
+        configuration.userContentController.addUserScript(rememberMe)
         webView.navigationDelegate = self
         webView.uiDelegate = self
     }
@@ -86,6 +92,21 @@ final class CentralBrowserSession: NSObject {
         if (String(name).toLowerCase() === "authorization") { remember(value); }
         return originalSetRequestHeader.apply(this, arguments);
       };
+    })();
+    """
+
+    /// На странице логина accounts.zerotier.com автоматически ставим галку "Remember me",
+    /// чтобы SSO-сессия keycloak жила дольше и авто-переавторизация работала без пароля.
+    private static let rememberMeScript = """
+    (() => {
+      if (!window.location.host.includes("accounts.zerotier.com")) { return; }
+      const tick = () => {
+        const checkbox = document.querySelector('input#rememberMe, input[name="rememberMe"]');
+        if (checkbox && !checkbox.checked) { checkbox.click(); }
+      };
+      tick();
+      const timer = setInterval(tick, 500);
+      setTimeout(() => clearInterval(timer), 15000);
     })();
     """
 
@@ -209,23 +230,54 @@ final class CentralBrowserSession: NSObject {
     /// Пробует восстановить сессию без участия пользователя: открывает Central,
     /// на странице логина кликает "Sign in with Google", на accounts.google.com
     /// выбирает аккаунт. Работает, пока жива Google-сессия в cookie-хранилище WKWebView.
-    func attemptAutoLogin(networkID: String?, timeoutSeconds: Double = 60) async -> Bool {
+    func attemptAutoLogin(networkID: String?, timeoutSeconds: Double = 90) async -> Bool {
+        logAutoLogin("start")
         await loadAndWaitForPage(networkID: networkID)
-        if await validAuthToken() != nil { return true }
+        if await validAuthToken() != nil {
+            logAutoLogin("token already valid")
+            return true
+        }
 
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         var idleSteps = 0
+        var spaReloads = 0
 
         while Date() < deadline {
             if isOnCentralPage, await validAuthToken() != nil {
+                logAutoLogin("success at \(webView.url?.absoluteString ?? "-")")
                 return true
             }
 
+            // Застряли на central.zerotier.com без токена — например, на OAuth
+            // callback (/api/v2/user/login/keycloak/callback), где SPA не запускается.
+            // Перезагружаем SPA, чтобы он выпустил свежий JWT по сессионной куке.
+            let path = webView.url?.path ?? ""
+            if isOnCentralPage, path.hasPrefix("/api/") || idleSteps >= 4 {
+                guard spaReloads < 3 else {
+                    logAutoLogin("giving up: SPA reloads exhausted at \(path)")
+                    return false
+                }
+                spaReloads += 1
+                idleSteps = 0
+                logAutoLogin("reload SPA #\(spaReloads) from \(path)")
+                await loadAndWaitForPage(networkID: networkID)
+                if await waitForAuthToken(timeoutSeconds: 10) != nil {
+                    logAutoLogin("success after SPA reload")
+                    return true
+                }
+                continue
+            }
+
             let action = await performAutoLoginStep()
+            logAutoLogin("step=\(action) at \(webView.url?.host ?? "-")\(path)")
             if action == "none" || action == "error" || action.hasSuffix("-wait") {
                 idleSteps += 1
-                // Долго стоим на месте без токена — дальше без пользователя не продвинемся.
-                if idleSteps >= 10 && !isOnCentralPage { return false }
+                // Долго стоим на чужой странице без прогресса —
+                // видимо, нужен пароль, без пользователя не продвинемся.
+                if idleSteps >= 10 && !isOnCentralPage {
+                    logAutoLogin("giving up: stuck at \(webView.url?.absoluteString ?? "-")")
+                    return false
+                }
                 try? await Task.sleep(for: .seconds(1))
             } else {
                 idleSteps = 0
@@ -234,7 +286,25 @@ final class CentralBrowserSession: NSObject {
             }
         }
 
-        return await validAuthToken() != nil
+        let ok = await validAuthToken() != nil
+        logAutoLogin(ok ? "success at deadline" : "failed at deadline, url=\(webView.url?.absoluteString ?? "-")")
+        return ok
+    }
+
+    private func logAutoLogin(_ message: String) {
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ZeroTierMenu", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appendingPathComponent("autologin.log")
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        guard let data = "\(timestamp) \(message)\n".data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: fileURL) {
+            defer { try? handle.close() }
+            handle.seekToEndOfFile()
+            handle.write(data)
+        } else {
+            try? data.write(to: fileURL)
+        }
     }
 
     /// Делает один шаг авто-логина и возвращает, что удалось сделать.
@@ -262,11 +332,16 @@ final class CentralBrowserSession: NSObject {
               return "google-wait";
             }
 
-            if (host.includes("central.zerotier.com") && window.location.pathname === "/") {
-              // SPA сам решает, показать логин или консоль — ждём.
-            }
-
             const nodes = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="submit"]'));
+
+            if (host.includes("central.zerotier.com")) {
+              // SPA показывает экран логина с кнопкой "Log In", ведущей на keycloak.
+              const loginButton = nodes.find((el) => {
+                const text = (el.innerText || el.value || "").trim();
+                return /^(log ?in|sign ?in|войти)/i.test(text) && visible(el);
+              });
+              if (loginButton) { loginButton.click(); return "zt-login"; }
+            }
             const googleButton = nodes.find((el) => {
               const haystack = [
                 el.innerText, el.value, el.title,
