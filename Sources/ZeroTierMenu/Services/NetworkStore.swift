@@ -145,7 +145,16 @@ final class NetworkStore {
 
         do {
             await ensureCentralPageLoaded()
-            let members = try await centralSession.fetchMembers(networkID: selectedNetwork.networkID)
+            let members: [CentralMemberRecord]
+            do {
+                members = try await centralSession.fetchMembers(networkID: selectedNetwork.networkID)
+            } catch CentralBrowserSessionError.unauthorized {
+                setStatus("Сессия истекла, переавторизуюсь через Google...", isError: false)
+                guard await centralSession.attemptAutoLogin(networkID: selectedNetwork.networkID) else {
+                    throw CentralBrowserSessionError.unauthorized
+                }
+                members = try await centralSession.fetchMembers(networkID: selectedNetwork.networkID)
+            }
             centralSessionState = .authenticated
             let allIPs = Array(Set(members.flatMap(\.ipv4Addresses))).sorted()
             let statuses = await scanner.reachability(hostIPs: allIPs)

@@ -204,6 +204,95 @@ final class CentralBrowserSession: NSObject {
         return nil
     }
 
+    // MARK: - Автоматическая переавторизация через Google
+
+    /// Пробует восстановить сессию без участия пользователя: открывает Central,
+    /// на странице логина кликает "Sign in with Google", на accounts.google.com
+    /// выбирает аккаунт. Работает, пока жива Google-сессия в cookie-хранилище WKWebView.
+    func attemptAutoLogin(networkID: String?, timeoutSeconds: Double = 60) async -> Bool {
+        await loadAndWaitForPage(networkID: networkID)
+        if await validAuthToken() != nil { return true }
+
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        var idleSteps = 0
+
+        while Date() < deadline {
+            if isOnCentralPage, await validAuthToken() != nil {
+                return true
+            }
+
+            let action = await performAutoLoginStep()
+            if action == "none" || action == "error" || action.hasSuffix("-wait") {
+                idleSteps += 1
+                // Долго стоим на месте без токена — дальше без пользователя не продвинемся.
+                if idleSteps >= 10 && !isOnCentralPage { return false }
+                try? await Task.sleep(for: .seconds(1))
+            } else {
+                idleSteps = 0
+                await waitForNavigationEnd(timeoutSeconds: 15)
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+
+        return await validAuthToken() != nil
+    }
+
+    /// Делает один шаг авто-логина и возвращает, что удалось сделать.
+    private func performAutoLoginStep() async -> String {
+        let script = """
+        (() => {
+          try {
+            const host = window.location.host || "";
+            const visible = (el) => {
+              if (!el) { return false; }
+              const rect = el.getBoundingClientRect();
+              return rect.width > 0 && rect.height > 0;
+            };
+
+            if (host.includes("accounts.google.com") || host.includes("google.com")) {
+              const preferred = document.querySelector('[data-identifier="\(Self.preferredGoogleAccount)"]');
+              if (preferred && visible(preferred)) { preferred.click(); return "google-account"; }
+              const anyAccount = document.querySelector("[data-identifier]");
+              if (anyAccount && visible(anyAccount)) { anyAccount.click(); return "google-account"; }
+              const approve = document.querySelector("#submit_approve_access button, #submit_approve_access");
+              if (approve && visible(approve)) { approve.click(); return "google-approve"; }
+              const cont = Array.from(document.querySelectorAll("button"))
+                .find((el) => /continue|продолжить|далее|next/i.test(el.innerText || "") && visible(el));
+              if (cont) { cont.click(); return "google-continue"; }
+              return "google-wait";
+            }
+
+            if (host.includes("central.zerotier.com") && window.location.pathname === "/") {
+              // SPA сам решает, показать логин или консоль — ждём.
+            }
+
+            const nodes = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="submit"]'));
+            const googleButton = nodes.find((el) => {
+              const haystack = [
+                el.innerText, el.value, el.title,
+                el.getAttribute("aria-label"), el.className, el.id,
+                el.getAttribute("href"), el.getAttribute("data-provider")
+              ].filter(Boolean).join(" ");
+              return /google/i.test(haystack) && visible(el);
+            });
+            if (googleButton) { googleButton.click(); return "zt-google"; }
+
+            return "none";
+          } catch (error) {
+            return "error";
+          }
+        })();
+        """
+
+        return await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(script) { value, _ in
+                continuation.resume(returning: (value as? String) ?? "error")
+            }
+        }
+    }
+
+    private static let preferredGoogleAccount = "zzzrokotzzz@gmail.com"
+
     func clearSession() async {
         let dataStore = webView.configuration.websiteDataStore
 
